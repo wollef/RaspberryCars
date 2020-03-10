@@ -363,17 +363,16 @@ def store_pos_in_db(delay):
             print("DB : Store position");
             # on cree le texte de la requete pour inserer dans la base
             sql = ''' INSERT INTO car_status(statusdate, gps_longitude , gps_latitude, sent, gps_speed, gps_elevation, obd_speed, obd_fuellevel, obd_rpm, gps_measure_time, obd_measure_time, gps_time)
-                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) '''
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?) '''
          
             # on ouvre le curseur vers la DB, et on lui demande d'executer la requete avec ces paramètres
             cur = conn.cursor()
-            cur.execute(sql, (statustime, lastGpsLongitude, lastGpsLattitude, 0, lastGpsSpeed, lastGpsElevation, lastObdSpeed,lastObdFuelLevel,lastObdRpm,lastGpsMeasureTime,lastObdMeasureTime,lastGpsTime,))
+            cur.execute(sql, (statustime, lastGpsLongitude, lastGpsLattitude, 0, lastGpsSpeed, lastGpsElevation, lastObdSpeed,lastObdFuelLevel,lastObdRpm,lastGpsMeasureTime,lastObdMeasureTime,lastGpsTime))
             
             # si on est dans le mode où on ouvre et ferme la connection à chaqiue fois, on la referme
             if MODE_SHARED_DB_CONNECTION == False:
                 conn.close()
                 print("DB : Connection closed");
-
             # on libere le verrou d'accès à la DB (le thread SF peut maintenant lire
             threadDbLock.release()
 
@@ -432,9 +431,7 @@ def send_data_to_sf(delay):
 
                 #on se connecte à SF
                 sf = Salesforce(
-                    username='user@organisation.org',
-                    password='1234356',
-                    security_token='ABCDEF'
+  
                 );
 
                 # on cree :
