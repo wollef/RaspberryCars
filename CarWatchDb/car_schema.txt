@@ -1,0 +1,17 @@
+CREATE TABLE car_status(
+	statusdate integer, 
+	
+	gps_time integer,
+	gps_longitude Decimal(9,6), 
+	gps_latitude Decimal(9,6), 
+	gps_speed decimal(9,2), 
+	gps_elevation decimal(9,2), 
+	gps_measure_time integer,
+	
+	obd_speed decimal(9, 2), 
+	obd_rpm decimal(9, 2),
+	obd_fuellevel decimal(9, 2),  
+	obd_measure_time integer,
+	
+	sent boolean
+);

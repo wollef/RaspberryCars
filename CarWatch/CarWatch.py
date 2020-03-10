@@ -38,7 +38,7 @@ ENDC = "\x1b[0;0m"
 
 # constantes pour afficher le debug pour chaque thread
 FULL_DEBUG_GPS = False
-SMALL_DEBUG_GPS = False
+SMALL_DEBUG_GPS = True
 DEBUG_GPS = True
 
 DEBUG_OBD = True
@@ -46,9 +46,12 @@ DEBUG_OBD = True
 MODE_SHARED_DB_CONNECTION = True
 MODE_STORE_LAST_POSITION = False
 
-# constantes pour indiquer à SF quelle voiture est suivie
-# CAR_NUMBER = "AZ 4242" #"AZ 2424"
+# constantes pour indiquer le numero du capteur (si on a plusieurs Raspberry qui execute le programme :
+# chacun devra avoir une valeur differente
+# les données ne devront pas se melanger dans SF)
+RASPBERRY_NUMBER = "RASP_1"
 
+CAR_DB = "/home/pi/RaspberryCars/Database/raspberrycars.db"
 
 # ***************************************************************************    
 # ***************************************************************************    
@@ -58,7 +61,7 @@ MODE_STORE_LAST_POSITION = False
 
 
 def watch_gps( gpsPort):
-    # les variables dans lesquelles la thread gps stoque ce qu'elle a trouvé
+    # la demande d'utilisation des variables dans lesquelles la thread gps stoque ce qu'elle a trouvé
     global lastGpsPositionMeasured;
     global lastGpsLongitude;
     global lastGpsLattitude;
@@ -184,13 +187,17 @@ def watch_gps( gpsPort):
                 # mais pour eviter qu'une autre thread les lise pendant qu'on les modifie on demande le verrou
                 # et on le libère une fois les valeurs stoquées
                 threadGpsLock.acquire()
+                # on indique qu'on a eu une nouvelle mesure reussie
                 lastGpsPositionMeasured = True
-                lastGpsMeasureTime = int(datetime.timestamp(datetime.now())); 
+                # on memorise l'heure
+                lastGpsMeasureTime = int(datetime.timestamp(datetime.now()));
+                # on memorise le resultta du GPS
                 lastGpsLongitude = s5;
                 lastGpsLattitude = s3;
                 lastGpsSpeed = theSpeed;
                 lastGpsElevation = theElevation;
-                lastGpsTime = int(theDateTimeTimestamp) 
+                lastGpsTime = int(theDateTimeTimestamp)
+                # et on  libère le verrou une fois les valeurs stoquées           
                 threadGpsLock.release()
                 
 # ***************************************************************************    
@@ -200,7 +207,7 @@ def watch_gps( gpsPort):
 # ***************************************************************************      
        
 def watch_odb(obdPort, delay):
-    # les variables dans lesquelles la thread gps stoque ce qu'elle qa trouvé
+    # la demande d'utilisation des variables dans lesquelles la thread gps stoque ce qu'elle qa trouvé
     global lastObdMeasured;
     global lastObdMeasureTime;
     global lastObdSpeed
@@ -244,13 +251,16 @@ def watch_odb(obdPort, delay):
             
             # on va placer les valeurs lues dans les variables globales
             # mais pour eviter qu'une autre thread les lise pendant qu'on les modifie on demande le verrou
-            # et on le libère une fois les valeurs stoquées           
             threadObdLock.acquire()
+            # on indique qu'on a eu une nouvelle mesure reussie
             lastObdMeasured = True
-            lastObdMeasureTime = int(datetime.timestamp(datetime.now())) 
+            # on memorise l'heure
+            lastObdMeasureTime = int(datetime.timestamp(datetime.now()))
+            # on memorise le resultta du OBD
             lastObdSpeed = speedValue;
             lastObdRpm = rpmValue;
             lastObdFuelLevel = fuelLevelValue;
+            # et on  libère le verrou une fois les valeurs stoquées           
             threadObdLock.release()
         except Exception as e:
             print(C_ERROR+"OBD : Error: unable to getOBD Data", ENDC)
@@ -259,6 +269,245 @@ def watch_odb(obdPort, delay):
         time.sleep(delay)
     
     
+# ***************************************************************************    
+# ***************************************************************************    
+# l ecriture dans la DB Locale
+# ***************************************************************************    
+# ***************************************************************************        
+    
+def store_pos_in_db(delay):
+
+    # la declaration de partage des variables memoriséé par le thread GPS
+    global lastGpsPositionMeasured;
+    global lastGpsLongitude;
+    global lastGpsLattitude;
+    global lastGpsSpeed
+    global lastGpsElevation;
+    global lastGpsMeasureTime;
+    global lastGpsTime;
+
+    # la declaration de partage des variables memoriséé par le thread OBD
+    global lastObdMeasured;
+    global lastObdMeasureTime;
+    global lastObdSpeed
+    global lastObdFuelLevel
+    global lastObdRpm
+
+
+    # initialisation des variables GPS
+    lastGpsPositionMeasured = False;
+    lastGpsLongitude = 0;
+    lastGpsLattitude =0;
+    lastGpsSpeed =0;
+    lastGpsElevation =0;
+    lastGpsMeasureTime =0;
+    lastGpsTime = 0
+    
+    # initialisation OBD
+    lastObdMeasured = False;
+    lastObdMeasureTime = 0;
+    lastObdSpeed = 0;
+    lastObdFuelLevel= 0;
+    lastObdRpm= 0;
+
+    # deux mode possibles :
+    # - un ou on garde la connection DB active entre chaque attente
+    # - un ou on la referme a chaque fois
+    if MODE_SHARED_DB_CONNECTION == True:
+        permanentDBConnectionB = sqlite3.connect(CAR_DB, isolation_level=None);
+    
+    # on boucle en permanence
+    while True:
+        # on essaye d'ecrie vers la DB
+        print("DB: Try to store position");
+        
+        # on bloque le verrou sur les variables partagées
+        threadGpsLock.acquire()
+        threadObdLock.acquire()        
+
+        # on memorise l'heure courante (que l'on va memoriser : la dernière mesure est faite depuis quelques secondes
+        statustime=int(datetime.timestamp(datetime.now()))
+
+        # un affichage pour le debug
+        print (C_DB+ "--------------------------------------------", ENDC)
+        print (C_DB+ "DB: db.time  :", datetime.utcfromtimestamp(statustime).strftime('%Y-%m-%d %H:%M:%S') , ENDC)
+        print (C_DB+ "--------------------------------------------", ENDC)
+        print (C_DB+ "DB: g.status :", lastGpsPositionMeasured, ENDC)
+        print (C_DB+ "DB: g.time   :", datetime.utcfromtimestamp(lastGpsMeasureTime).strftime('%Y-%m-%d %H:%M:%S'), ENDC)
+        print (C_DB+ "DB: g.lat.   :", lastGpsLattitude, ENDC)
+        print (C_DB+ "DB: g.long   :", lastGpsLongitude, ENDC)
+        print (C_DB+ "DB: g.speed  :", lastGpsSpeed, ENDC)
+        print (C_DB+ "DB: g.elev   :", lastGpsElevation, ENDC)
+        print (C_DB+ "DB: g.gtime  :", datetime.utcfromtimestamp(lastGpsTime).strftime('%Y-%m-%d %H:%M:%S'), ENDC)
+        print (C_DB+ "--------------------------------------------", ENDC)
+        print (C_DB+ "DB: o.status :", lastObdMeasured, ENDC)
+        print (C_DB+ "DB: o.time   :", datetime.utcfromtimestamp(lastObdMeasureTime).strftime('%Y-%m-%d %H:%M:%S'), ENDC)
+        print (C_DB+ "DB: o.speed  :", lastObdSpeed, ENDC)
+        print (C_DB+ "DB: o.rpm    :", lastObdRpm, ENDC)
+        print (C_DB+ "DB: o.fuel   :", lastObdFuelLevel, ENDC)
+        print (C_DB+ "--------------------------------------------", ENDC)
+
+        # si un des threads a une nouvelle donnée
+        if lastGpsPositionMeasured == True or lastObdMeasured == True :
+ 
+            # on bloque l'accès à la DB, pour que le threqd SF ne trqvqille pqs en meme temps
+            threadDbLock.acquire()
+    
+            # si on est dans le mode DB en permanence active, on utilise la connection, sinon on l'ouvre
+            if MODE_SHARED_DB_CONNECTION == True:
+                conn = permanentDBConnectionB
+            else :
+                print(C_SF+"DB : Connect to DB", ENDC);
+                conn = sqlite3.connect(CAR_DB, isolation_level=None);
+
+            print("DB : Store position");
+            # on cree le texte de la requete pour inserer dans la base
+            sql = ''' INSERT INTO car_status(statusdate, gps_longitude , gps_latitude, sent, gps_speed, gps_elevation, obd_speed, obd_fuellevel, obd_rpm, gps_measure_time, obd_measure_time, gps_time)
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) '''
+         
+            # on ouvre le curseur vers la DB, et on lui demande d'executer la requete avec ces paramètres
+            cur = conn.cursor()
+            cur.execute(sql, (statustime, lastGpsLongitude, lastGpsLattitude, 0, lastGpsSpeed, lastGpsElevation, lastObdSpeed,lastObdFuelLevel,lastObdRpm,lastGpsMeasureTime,lastObdMeasureTime,lastGpsTime,))
+            
+            # si on est dans le mode où on ouvre et ferme la connection à chaqiue fois, on la referme
+            if MODE_SHARED_DB_CONNECTION == False:
+                conn.close()
+                print("DB : Connection closed");
+
+            # on libere le verrou d'accès à la DB (le thread SF peut maintenant lire
+            threadDbLock.release()
+
+        # on lib ere les verrous d'accès au variables pour que les thread OBD et GPS puissent y écrire
+        threadGpsLock.release()
+        threadObdLock.release()
+        
+        time.sleep(delay)
+
+# ***************************************************************************    
+# ***************************************************************************    
+# le programme d'envoi à SF de ce qui est dans la base locale
+# ***************************************************************************    
+# ***************************************************************************        
+
+def send_data_to_sf(delay):
+
+    # if mode shared DB : create connection une fois
+    if MODE_SHARED_DB_CONNECTION == True:
+        permanentDBConnectionA = sqlite3.connect(CAR_DB, isolation_level=None);
+
+
+    while True:
+        # on demande l'acces exclusif à la DB
+        threadDbLock.acquire()
+        print(C_SF+"SF : Got DB lock", ENDC);
+
+        try:
+            # if mode shared DB : crée connection à chaque fois
+            if MODE_SHARED_DB_CONNECTION == True:
+                conn = permanentDBConnectionA
+            else :
+                print(C_SF+"SF : Connect to DB", ENDC);
+                conn = sqlite3.connect(CAR_DB, isolation_level=None);
+
+            print(C_SF+"SF : Look for new Status", ENDC);
+            
+            # on demande un curseur sur la DB
+            cursor = conn.cursor()
+            # on lit les lignes qu'on n'a pas encore envoyée (  where sent != 1)
+            cursor.execute("SELECT rowid, statusdate, gps_longitude , gps_latitude, gps_speed, gps_elevation, obd_speed, obd_fuellevel, obd_rpm,  gps_measure_time, obd_measure_time, gps_time FROM car_status where sent != 1 order by statusdate asc")
+            rows = cursor.fetchall()
+            # on referme le curseru
+            cursor.close()
+
+            # on regarde combien de mesure on a eu
+            count = 0;
+            for row in rows:
+                count = count + 1
+
+            # si il y a des lignes, on va les mettre dans SF
+            if count>0 :
+                print(C_SF+"SF : Status to transfer to SF :" , count, ENDC);
+
+                print(C_SF+'SF : Connect to SF', ENDC)
+
+                #on se connecte à SF
+                sf = Salesforce(
+                    username='user@organisation.org',
+                    password='1234356',
+                    security_token='ABCDEF'
+                );
+
+                # on cree :
+                # - un tableau new_positions avec toutes les positions au format SF
+                # - un tableau rowsToMark avec les lignes à marquer comme lues
+                print(C_SF+"SF : Prepare new position objects", ENDC);
+                new_positions = []
+                last_positions = []
+                rowsToMark = []
+                for row in rows:
+                    # conversion de format pour les dates
+                    datestring = datetime.utcfromtimestamp(row[1]).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    gmtime = datetime.utcfromtimestamp(row[9]).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    omtime = datetime.utcfromtimestamp(row[10]).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    gtime = datetime.utcfromtimestamp(row[11]).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    new_positions.append({
+                        'Tracker_ID__c': RASPBERRY_NUMBER,
+                        'Requested_On__c': datestring,
+                        'GPS_Longitude__c' : row[2],
+                        'GPS_Latitude__c' : row[3],
+                        'GPS_Speed__c' : row[4],
+                        'GPS_Elevation__c' : row[5],                
+                        'OBD_Speed__c' : row[6],                
+                        'OBD_Fuel_Level__c' : row[7],                
+                        'OBD_RPM__c' : row[8],
+                        'GPS_Measure_Time__c' : gmtime,
+                        'OBD_Measure_Time__c' : omtime,
+                        'GPS_Time__c' : gtime,
+                        
+                    })
+                        
+                    rowsToMark.append((1,row[0]));
+                
+                # on demande à SF d'inserer toutes les nouvelles lignes
+                print(C_SF+'SF : Send Big Object Positions', ENDC)
+                print(C_SF+'SF : All Positions are : ',new_positions, ENDC)
+                createdPositions1 = sf.bulk.Car_Monitoring_Data__b.insert(new_positions)
+                
+                # on dit à la DB que toutes ces lignes ont éte utilisées
+                print(C_SF+'SF : Update database records', ENDC)
+                print(C_SF+'SF : Records to update are : ',rowsToMark, ENDC)
+                cursor = conn.cursor()
+                cursor.executemany('UPDATE car_status SET sent=? WHERE rowid=?', (rowsToMark) )
+                cursor.close()
+
+                # on demande à la DB de valider la sauvearde des lignes
+                print(C_SF+'SF : Commit changes in DB', ENDC)
+                conn.commit
+
+                print(C_SF+'SF : Transfer to SF done', ENDC)
+            else :
+                print(C_SF+'SF : Nothing to transfer to SF', ENDC)
+
+            # close DB connection si one est en mode de connection non permanente
+            if MODE_SHARED_DB_CONNECTION == False:
+                conn.close()
+                print("SF : DB Connection closed");
+
+        except Exception as e:
+            print(C_ERROR+"SF : Error: unable to send data to SF", ENDC)
+            print(C_ERROR+str(e), ENDC)
+
+        # on libere l'accès à la DB pour qu'elle puisse etre mise à jour par les autres taches
+        threadDbLock.release()
+        print(C_SF+"SF : DB lock released", ENDC);
+
+        # on attend le delai demandé
+        print(C_SF+'SF : Wait', ENDC)
+        time.sleep(delay)
+
+
+
 # ***************************************************************************    
 # ***************************************************************************    
 # le programme principal
@@ -287,7 +536,7 @@ for port in serial.tools.list_ports.comports() :
 
 threadGpsLock = threading.Lock()
 threadObdLock = threading.Lock()
-#threadDbLock = threading.Lock()
+threadDbLock = threading.Lock()
 
 
 try:
@@ -298,13 +547,13 @@ try:
         
     # watch odb every second
     if obdPortDevice != "":
-        _thread.start_new_thread( watch_odb, (obdPortDevice, 1) )
+        _thread.start_new_thread( watch_odb, (obdPortDevice, 1, ) )
         
     #store infos every 2 seconds = 10 is ok
-  ##  _thread.start_new_thread( store_pos_in_db, ("Thread-DB", 2, ) )
+    _thread.start_new_thread( store_pos_in_db, (2, ) )
     
     # send info every 5 minutes
-  ##  _thread.start_new_thread( send_data_to_sf, ("Thread-SF", 300, True, ) )
+    _thread.start_new_thread( send_data_to_sf, (300, ) )
     
 except Exception as e:
    print(C_ERROR+ "Error: unable to start one of the thread", ENDC)
